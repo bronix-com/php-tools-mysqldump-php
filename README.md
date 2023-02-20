@@ -1,6 +1,9 @@
 MySQLDump - PHP
 =========
 
+Особенности форка:
+* есть настройка on-duplicate-update
+
 [Requirements](https://github.com/ifsnop/mysqldump-php#requirements) |
 [Installing](https://github.com/ifsnop/mysqldump-php#installing) |
 [Getting started](https://github.com/ifsnop/mysqldump-php#getting-started) |

@@ -136,6 +136,7 @@ class Mysqldump
         'events' => false,
         'hex-blob' => true, /* faster than escaped content */
         'insert-ignore' => false,
+        'on-duplicate-update' => false,
         'net_buffer_length' => self::MAXLINESIZE,
         'no-autocommit' => true,
         'no-create-db' => false,
@@ -154,9 +155,9 @@ class Mysqldump
     );
 
     protected $pdoSettingsDefault = array(
-            PDO::ATTR_PERSISTENT => true,
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        );
+        PDO::ATTR_PERSISTENT => true,
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    );
 
     /**
      * Constructor of Mysqldump. Note that in the case of an SQLite database
@@ -278,9 +279,9 @@ class Mysqldump
     }
 
     /**
-    * Import supplied SQL file
-    * @param string $path Absolute path to imported *.sql file
-    */
+     * Import supplied SQL file
+     * @param string $path Absolute path to imported *.sql file
+     */
     public function restore($path)
     {
         if(!$path || !is_file($path)){
@@ -503,9 +504,9 @@ class Mysqldump
         if (!$this->dumpSettings['skip-comments']) {
             // Some info about software, source and time
             $header = "-- mysqldump-php https://github.com/ifsnop/mysqldump-php".PHP_EOL.
-                    "--".PHP_EOL.
-                    "-- Host: {$this->host}\tDatabase: {$this->dbName}".PHP_EOL.
-                    "-- ------------------------------------------------------".PHP_EOL;
+                "--".PHP_EOL.
+                "-- Host: {$this->host}\tDatabase: {$this->dbName}".PHP_EOL.
+                "-- ------------------------------------------------------".PHP_EOL;
 
             if (!empty($this->version)) {
                 $header .= "-- Server version \t".$this->version.PHP_EOL;
@@ -703,7 +704,7 @@ class Mysqldump
             if (false === $this->dumpSettings['no-data']) { // don't break compatibility with old trigger
                 $this->listValues($table);
             } elseif (true === $this->dumpSettings['no-data']
-                 || $this->matches($table, $this->dumpSettings['no-data'])) {
+                || $this->matches($table, $this->dumpSettings['no-data'])) {
                 continue;
             } else {
                 $this->listValues($table);
@@ -1160,6 +1161,17 @@ class Mysqldump
 
         $ignore = $this->dumpSettings['insert-ignore'] ? '  IGNORE' : '';
 
+        $onDuplicate = '';
+        if ($this->dumpSettings['on-duplicate-update'] && $colNames) {
+            $onDuplicate = " ON DUPLICATE KEY UPDATE "
+                . implode(
+                    ", ",
+                    array_map(function ($col) {
+                        return $col . " = VALUES(" . $col . ")";
+                    }, $colNames)
+                );
+        }
+
         $count = 0;
         foreach ($resultSet as $row) {
             $count++;
@@ -1181,14 +1193,21 @@ class Mysqldump
                 $lineSize += $this->compressManager->write(",(".implode(",", $vals).")");
             }
             if (($lineSize > $this->dumpSettings['net_buffer_length']) ||
-                    !$this->dumpSettings['extended-insert']) {
+                !$this->dumpSettings['extended-insert']) {
                 $onlyOnce = true;
+                if ($onDuplicate) {
+                    $this->compressManager->write($onDuplicate);
+                }
                 $lineSize = $this->compressManager->write(";".PHP_EOL);
             }
         }
+
         $resultSet->closeCursor();
 
         if (!$onlyOnce) {
+            if ($onDuplicate) {
+                $lineSize += $this->compressManager->write($onDuplicate);
+            }
             $this->compressManager->write(";".PHP_EOL);
         }
 
@@ -1509,29 +1528,29 @@ class CompressGzipstream extends CompressManagerFactory
      */
     public function open($filename)
     {
-    $this->fileHandler = fopen($filename, "wb");
-    if (false === $this->fileHandler) {
-        throw new Exception("Output file is not writable");
-    }
+        $this->fileHandler = fopen($filename, "wb");
+        if (false === $this->fileHandler) {
+            throw new Exception("Output file is not writable");
+        }
 
-    $this->compressContext = deflate_init(ZLIB_ENCODING_GZIP, array('level' => 9));
-    return true;
+        $this->compressContext = deflate_init(ZLIB_ENCODING_GZIP, array('level' => 9));
+        return true;
     }
 
     public function write($str)
     {
 
-    $bytesWritten = fwrite($this->fileHandler, deflate_add($this->compressContext, $str, ZLIB_NO_FLUSH));
-    if (false === $bytesWritten) {
-        throw new Exception("Writting to file failed! Probably, there is no more free space left?");
-    }
-    return $bytesWritten;
+        $bytesWritten = fwrite($this->fileHandler, deflate_add($this->compressContext, $str, ZLIB_NO_FLUSH));
+        if (false === $bytesWritten) {
+            throw new Exception("Writting to file failed! Probably, there is no more free space left?");
+        }
+        return $bytesWritten;
     }
 
     public function close()
     {
-    fwrite($this->fileHandler, deflate_add($this->compressContext, '', ZLIB_FINISH));
-    return fclose($this->fileHandler);
+        fwrite($this->fileHandler, deflate_add($this->compressContext, '', ZLIB_FINISH));
+        return fclose($this->fileHandler);
     }
 }
 
@@ -1856,7 +1875,7 @@ class TypeAdapterMysql extends TypeAdapterFactory
     public function databases()
     {
         if ($this->dumpSettings['no-create-db']) {
-           return "";
+            return "";
         }
 
         $this->check_parameters(func_num_args(), $expected_num_args = 1, __METHOD__);
@@ -1923,8 +1942,8 @@ class TypeAdapterMysql extends TypeAdapterFactory
             $createTable = preg_replace($match, $replace, $createTable);
         }
 
-		if ($this->dumpSettings['if-not-exists'] ) {
-			$createTable = preg_replace('/^CREATE TABLE/', 'CREATE TABLE IF NOT EXISTS', $createTable);
+        if ($this->dumpSettings['if-not-exists'] ) {
+            $createTable = preg_replace('/^CREATE TABLE/', 'CREATE TABLE IF NOT EXISTS', $createTable);
         }
 
         $ret = "/*!40101 SET @saved_cs_client     = @@character_set_client */;".PHP_EOL.
@@ -2104,8 +2123,8 @@ class TypeAdapterMysql extends TypeAdapterFactory
             "/*!50003 SET collation_connection  = @saved_col_connection */ ;;".PHP_EOL.
             "DELIMITER ;".PHP_EOL.
             "/*!50106 SET TIME_ZONE= @save_time_zone */ ;".PHP_EOL.PHP_EOL;
-            // Commented because we are doing this in restore_parameters()
-            // "/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;" . PHP_EOL . PHP_EOL;
+        // Commented because we are doing this in restore_parameters()
+        // "/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;" . PHP_EOL . PHP_EOL;
 
         return $ret;
     }
@@ -2271,7 +2290,7 @@ class TypeAdapterMysql extends TypeAdapterFactory
         $this->check_parameters(func_num_args(), $expected_num_args = 1, __METHOD__);
         $args = func_get_args();
         return "DROP TABLE IF EXISTS `{$args[0]}`;".PHP_EOL.
-                "/*!50001 DROP VIEW IF EXISTS `{$args[0]}`*/;".PHP_EOL;
+            "/*!50001 DROP VIEW IF EXISTS `{$args[0]}`*/;".PHP_EOL;
     }
 
     public function getDatabaseHeader()
@@ -2325,7 +2344,7 @@ class TypeAdapterMysql extends TypeAdapterFactory
         }
 
         if ($this->dumpSettings['no-autocommit']) {
-                $ret .= "/*!40101 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT */;".PHP_EOL;
+            $ret .= "/*!40101 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT */;".PHP_EOL;
         }
 
         $ret .= "/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;".PHP_EOL.
@@ -2345,7 +2364,7 @@ class TypeAdapterMysql extends TypeAdapterFactory
         }
 
         if ($this->dumpSettings['no-autocommit']) {
-                $ret .= "/*!40101 SET AUTOCOMMIT=@OLD_AUTOCOMMIT */;".PHP_EOL;
+            $ret .= "/*!40101 SET AUTOCOMMIT=@OLD_AUTOCOMMIT */;".PHP_EOL;
         }
 
         $ret .= "/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;".PHP_EOL.
